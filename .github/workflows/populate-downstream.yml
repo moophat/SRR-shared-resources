@@ -23,11 +23,6 @@ jobs:
       - name: Add yq to PATH
         run: echo "$HOME/bin" >> $GITHUB_PATH
 
-      - name: Set git identity
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
       - name: Run downstream sync
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
@@ -57,7 +52,13 @@ jobs:
               echo "📦 Injecting $folder → $TARGET_PATH"
 
               cd "$TMPDIR/$consumer"
+              
+              # Set git identify for this folder
+              git config user.name "github-actions[bot]"
+              git config user.email "github-actions[bot]@users.noreply.github.com"
+              
               mkdir -p "$TARGET_PATH"
+              # set the DESTINATION folder
               git --work-tree="$TARGET_PATH" checkout "shared/split-$folder" -- .
             done
 
