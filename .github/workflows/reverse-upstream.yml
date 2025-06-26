@@ -9,8 +9,17 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout shared-resources
-        uses: actions/checkout@v4
+      #- name: Checkout shared-resources
+      #  uses: actions/checkout@v4
+        
+      - name: Clone shared-resources with PAT
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }} 
+      # abosulutely must do this clone using command line, can NOT use checkout action because fucking git will not allow us to push back using GH_PAT later if we cloned using action plugin
+        run: |
+          git clone "https://${GH_PAT}@github.com/moophat/SRR-shared-resources.git" .
+          git checkout main
+
 
       - name: Install yq
         run: |
