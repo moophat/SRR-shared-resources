@@ -69,8 +69,12 @@ jobs:
               cd "$TMPDIR/$consumer"
               
 
-              
+              #create IF NOT exist
               mkdir -p "$TARGET_PATH"
+
+              # Remove all previous files from target path before injection, to ensure deletions sync correctly
+              rm -rf "$TARGET_PATH"/*
+              
               # set the DESTINATION folder using git checkout using work-tree, but this WILL cause us to lose the bloody commit history on this folder (of the shared repo), only lastest data is retain
               git --work-tree="$TARGET_PATH" checkout "shared/split-$folder" -- .
 
