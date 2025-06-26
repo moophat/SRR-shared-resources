@@ -1,0 +1,14 @@
+name: Reverse Upstream Trigger Test
+
+on:
+  repository_dispatch:
+    types: [push-upstream]
+
+jobs:
+  confirm-trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: ✅ Dispatch received
+        run: |
+          echo "🔔 Triggered by repository_dispatch"
+          echo "🔧 Consumer: ${{ github.event.client_payload.consumer }}"
