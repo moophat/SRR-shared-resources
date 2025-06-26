@@ -29,7 +29,7 @@ jobs:
           CONSUMER="${{ steps.extract.outputs.consumer }}"
           echo "REPO=$(yq e ".\"$CONSUMER\".repo" "$CONFIG")" >> $GITHUB_ENV
 
-      - name: Split and inject folder(s) from consumer into shared layout
+      - name: Pull content from consumer and inject into shared-resources
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
         run: |
@@ -37,7 +37,6 @@ jobs:
           CONSUMER="${{ steps.extract.outputs.consumer }}"
           CONFIG=".github/consumer-config.yml"
 
-          # Clone the consumer repo
           git clone "https://${GH_PAT}@${REPO#https://}" consumer
           cd consumer
           git checkout main
@@ -61,14 +60,12 @@ jobs:
               git branch -f "$TARGET_BRANCH" origin/main
               git checkout "$TARGET_BRANCH"
 
-              mkdir -p "shared/$shared_folder"
-              git --work-tree="shared/$shared_folder" checkout "$GITHUB_WORKSPACE/consumer" "$SPLIT_BRANCH" -- .
+              mkdir -p "$shared_folder"
+              git --work-tree="$shared_folder" checkout "$GITHUB_WORKSPACE/consumer" "$SPLIT_BRANCH" -- .
 
               git config user.name "github-actions[bot]"
               git config user.email "github-actions[bot]@users.noreply.github.com"
-              git add "shared/$shared_folder"
+              git add "$shared_folder"
               git commit -m "[auto-sync][$CONSUMER] update $shared_folder" || echo "Nothing to commit"
               git push -f origin "$TARGET_BRANCH"
-
-              echo "✅ Finished: $TARGET_BRANCH"
-            done
+          done
