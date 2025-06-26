@@ -34,13 +34,14 @@ jobs:
           CONSUMER="${{ steps.extract.outputs.consumer }}"
           REPO=$(yq e ".\"$CONSUMER\".repo" "$CONFIG")
           echo "repo=$REPO" >> $GITHUB_OUTPUT
-
-      # Clone the consumer repo with PAT for auth
       - name: Clone consumer repo
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
         run: |
-          git clone "https://${GH_PAT}@${{ steps.config.outputs.repo#https:// }}" consumer
+          REPO_URL="${{ steps.config.outputs.repo }}"
+          CLONE_URL="https://${GH_PAT}@${REPO_URL#https://}"
+          
+          git clone "$CLONE_URL" consumer
           cd consumer
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
