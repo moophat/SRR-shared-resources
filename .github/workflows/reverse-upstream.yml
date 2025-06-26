@@ -9,24 +9,25 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # clone the shared-resources repo
-      - name: Checkout self (shared repo)
+      # Checkout shared-resources (this repo)
+      - name: Checkout self
         uses: actions/checkout@v4
 
-      # install yq (Go version)
+      # Install yq (Go version)
       - name: Install yq
         run: |
           mkdir -p $HOME/bin
           curl -L https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -o $HOME/bin/yq
           chmod +x $HOME/bin/yq
+        shell: bash
 
-      # grab consumer name from payload
+      # Extract consumer name from dispatch payload
       - name: Extract consumer name
         id: extract
         run: echo "consumer=${{ github.event.client_payload.consumer }}" >> $GITHUB_OUTPUT
 
-      # extract repo URL from consumer-config.yml
-      - name: Load consumer repo info
+      # Read consumer repo from config
+      - name: Parse consumer-config.yml
         id: config
         run: |
           CONFIG=".github/consumer-config.yml"
@@ -34,17 +35,21 @@ jobs:
           REPO=$(yq e ".\"$CONSUMER\".repo" "$CONFIG")
           echo "repo=$REPO" >> $GITHUB_OUTPUT
 
-      # clone the actual consumer repo and prepare for split
-      - name: Clone consumer and checkout main
+      # Clone the consumer repo with PAT for auth
+      - name: Clone consumer repo
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
         run: |
-          git clone "${{ steps.config.outputs.repo }}" consumer
+          git clone "https://${GH_PAT}@${{ steps.config.outputs.repo#https:// }}" consumer
           cd consumer
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git checkout main
 
-      # main split and push loop
-      - name: Subtree split and push
+      # Split and push per mapped folder
+      - name: Subtree split and push back to shared
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
         run: |
           set -e
           cd consumer
@@ -52,12 +57,23 @@ jobs:
           CONFIG="$GITHUB_WORKSPACE/.github/consumer-config.yml"
           CONSUMER="${{ steps.extract.outputs.consumer }}"
 
+          # Loop through local_path:shared_folder mappings
           yq e ".\"$CONSUMER\".folders" "$CONFIG" | \
           yq e 'to_entries | .[] | .value + ":" + .key' - | while IFS=":" read -r local_path shared_folder; do
-            echo "Splitting $local_path into subtree branch tmp-upstream-split-$shared_folder"
-            git subtree split --prefix="$local_path" -b "tmp-upstream-split-$shared_folder"
 
+            echo "Splitting $local_path → $shared_folder"
+
+            # Create a temporary branch with just that folder
+            BRANCH_NAME="tmp-upstream-split-$shared_folder"
             TARGET_BRANCH="from-${CONSUMER}-${shared_folder}"
-            echo "Pushing split to shared-resources:$TARGET_BRANCH"
-            git push origin "tmp-upstream-split-$shared_folder:$TARGET_BRANCH" --force
+
+            git subtree split --prefix="$local_path" -b "$BRANCH_NAME"
+
+            echo "Cloning shared-resources and pushing $TARGET_BRANCH"
+            cd "$GITHUB_WORKSPACE"
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git remote set-url origin "https://${GH_PAT}@github.com/moophat/SRR-shared-resources.git"
+            git push -f origin "$BRANCH_NAME:$TARGET_BRANCH"
+
           done
