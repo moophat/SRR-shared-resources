@@ -1,0 +1,1 @@
+[textfsm][1] >>> dummy content 1606567526 xyz lorem ipsum
