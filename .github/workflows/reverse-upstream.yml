@@ -1,4 +1,4 @@
-name: Reverse Upstream Sync – Pull from Consumer
+name: Reverse Upstream Sync – Populate into Shared Repo
 
 on:
   repository_dispatch:
@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout shared-resources repo
+      - name: Checkout shared-resources
         uses: actions/checkout@v4
 
       - name: Install yq
@@ -22,48 +22,51 @@ jobs:
         id: extract
         run: echo "consumer=${{ github.event.client_payload.consumer }}" >> $GITHUB_OUTPUT
 
-      - name: Read consumer repo from config
+      - name: Parse consumer repo URL
         id: config
         run: |
           CONFIG=".github/consumer-config.yml"
           CONSUMER="${{ steps.extract.outputs.consumer }}"
           echo "REPO=$(yq e ".\"$CONSUMER\".repo" "$CONFIG")" >> $GITHUB_ENV
 
-      - name: Clone consumer repo and push split branches
+      - name: Split and inject folder(s) from consumer into shared layout
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
         run: |
           set -e
+          CONSUMER="${{ steps.extract.outputs.consumer }}"
+          CONFIG=".github/consumer-config.yml"
 
-          # Clone consumer using PAT
+          # Clone the consumer repo
           git clone "https://${GH_PAT}@${REPO#https://}" consumer
           cd consumer
+          git checkout main
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git checkout main
 
-          CONFIG="../.github/consumer-config.yml"
-          CONSUMER="${{ steps.extract.outputs.consumer }}"
-
-          # Parse and process folder mappings
-          yq e ".\"$CONSUMER\".folders" "$CONFIG" | \
+          yq e ".\"$CONSUMER\".folders" "$GITHUB_WORKSPACE/$CONFIG" | \
             yq e 'to_entries | .[] | .key as $k | .value as $v | [$v, $k] | @tsv' - \
             | while IFS=$'\t' read -r local_path shared_folder; do
 
               echo "Splitting $local_path → $shared_folder"
-              BRANCH_NAME="tmp-upstream-split-$shared_folder"
+              SPLIT_BRANCH="split-$shared_folder"
               TARGET_BRANCH="from-${CONSUMER}-${shared_folder}"
 
-              # Do subtree split
-              git subtree split --prefix="$local_path" -b "$BRANCH_NAME"
+              git subtree split --prefix="$local_path" -b "$SPLIT_BRANCH"
 
-              # Verify split worked
-              git show-ref --verify --quiet "refs/heads/$BRANCH_NAME" || {
-                echo "❌ Branch $BRANCH_NAME not created, skipping"
-                continue
-              }
+              echo "Injecting into shared-resources:$TARGET_BRANCH"
+              cd "$GITHUB_WORKSPACE"
+              git fetch origin main
+              git checkout -B "$TARGET_BRANCH" origin/main
 
-              # Push directly from here to shared-resources
-              echo "Pushing $BRANCH_NAME → $TARGET_BRANCH"
-              git push -f "https://${GH_PAT}@github.com/moophat/SRR-shared-resources.git" "$BRANCH_NAME:$TARGET_BRANCH"
-          done
+              mkdir -p "shared/$shared_folder"
+              git --work-tree="shared/$shared_folder" checkout "$GITHUB_WORKSPACE/consumer" "$SPLIT_BRANCH" -- .
+
+              git config user.name "github-actions[bot]"
+              git config user.email "github-actions[bot]@users.noreply.github.com"
+              git add "shared/$shared_folder"
+              git commit -m "[auto-sync][$CONSUMER] update $shared_folder" || echo "Nothing to commit"
+              git push -f origin "$TARGET_BRANCH"
+
+              echo "✅ Finished: $TARGET_BRANCH"
+            done
