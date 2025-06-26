@@ -18,20 +18,25 @@ jobs:
           curl -L https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -o $HOME/bin/yq
           chmod +x $HOME/bin/yq
 
-      - name: Extract consumer name from dispatch payload
+      - name: Extract consumer name
         id: extract
         run: echo "consumer=${{ github.event.client_payload.consumer }}" >> $GITHUB_OUTPUT
 
-      - name: Parse consumer-config.yml to get repo URL
+      - name: Read consumer repo from config
         id: config
         run: |
           CONFIG=".github/consumer-config.yml"
           CONSUMER="${{ steps.extract.outputs.consumer }}"
           echo "REPO=$(yq e ".\"$CONSUMER\".repo" "$CONFIG")" >> $GITHUB_ENV
 
-      - name: Clone consumer repo using PAT
+      - name: Clone consumer repo and push split branches
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
         run: |
-          git clone "https://${{ secrets.GH_PAT }}@${REPO#https://}" consumer
+          set -e
+
+          # Clone consumer using PAT
+          git clone "https://${GH_PAT}@${REPO#https://}" consumer
           cd consumer
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -40,16 +45,25 @@ jobs:
           CONFIG="../.github/consumer-config.yml"
           CONSUMER="${{ steps.extract.outputs.consumer }}"
 
-          # Loop through mapped folders and push subtree branches
+          # Parse and process folder mappings
           yq e ".\"$CONSUMER\".folders" "$CONFIG" | \
-          yq e 'to_entries | .[] | .value + ":" + .key' - | while IFS=":" read -r local_path shared_folder; do
-            echo "Splitting $local_path → $shared_folder"
+            yq e 'to_entries | .[] | .key as $k | .value as $v | [$v, $k] | @tsv' - \
+            | while IFS=$'\t' read -r local_path shared_folder; do
 
-            BRANCH_NAME="tmp-upstream-split-$shared_folder"
-            TARGET_BRANCH="from-${CONSUMER}-${shared_folder}"
+              echo "Splitting $local_path → $shared_folder"
+              BRANCH_NAME="tmp-upstream-split-$shared_folder"
+              TARGET_BRANCH="from-${CONSUMER}-${shared_folder}"
 
-            git subtree split --prefix="$local_path" -b "$BRANCH_NAME"
+              # Do subtree split
+              git subtree split --prefix="$local_path" -b "$BRANCH_NAME"
 
-            echo "Pushing $BRANCH_NAME → $TARGET_BRANCH to SRR-shared-resources"
-            git push -f "https://${{ secrets.GH_PAT }}@github.com/moophat/SRR-shared-resources.git" "$BRANCH_NAME:$TARGET_BRANCH"
+              # Verify split worked
+              git show-ref --verify --quiet "refs/heads/$BRANCH_NAME" || {
+                echo "❌ Branch $BRANCH_NAME not created, skipping"
+                continue
+              }
+
+              # Push directly from here to shared-resources
+              echo "Pushing $BRANCH_NAME → $TARGET_BRANCH"
+              git push -f "https://${GH_PAT}@github.com/moophat/SRR-shared-resources.git" "$BRANCH_NAME:$TARGET_BRANCH"
           done
