@@ -29,7 +29,7 @@ jobs:
         run: |
           set -e
 
-          CONFIG=".github/consumer-config.yml"
+          CONFIG="$GITHUB_WORKSPACE/.github/consumer-config.yml"
           TMPDIR=$(mktemp -d)
 
           for consumer in $(yq e 'keys | .[]' "$CONFIG"); do
@@ -40,6 +40,11 @@ jobs:
             cd "$TMPDIR"
             git clone "https://${GH_PAT}@${REPO#https://}" "$consumer"
             cd "$consumer"
+            # Set git identify for this folder
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            
+            # go into the sync-auto branch of the consumer repo do do our fucking magic
             git checkout -b sync-auto || git checkout sync-auto
 
             # Link back to shared repo to fetch split branches
@@ -53,9 +58,7 @@ jobs:
 
               cd "$TMPDIR/$consumer"
               
-              # Set git identify for this folder
-              git config user.name "github-actions[bot]"
-              git config user.email "github-actions[bot]@users.noreply.github.com"
+
               
               mkdir -p "$TARGET_PATH"
               # set the DESTINATION folder
