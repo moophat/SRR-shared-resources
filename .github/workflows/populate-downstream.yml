@@ -32,6 +32,12 @@ jobs:
           CONFIG="$GITHUB_WORKSPACE/.github/consumer-config.yml"
           TMPDIR=$(mktemp -d)
 
+          # Pre-split all folders needed by any consumer
+          for folder in $(yq e '.. | select(has("folders")) | .folders | keys | .[]' "$CONFIG" | sort -u); do
+            echo "🌲 Splitting shared folder: $folder"
+            git subtree split --prefix="$folder" -b "split-$folder"
+          done
+
           for consumer in $(yq e 'keys | .[]' "$CONFIG"); do
             REPO=$(yq e ".\"$consumer\".repo" "$CONFIG")
             echo "🔄 Syncing consumer: $consumer ($REPO)"
