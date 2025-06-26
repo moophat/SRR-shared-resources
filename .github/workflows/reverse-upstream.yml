@@ -72,7 +72,12 @@ jobs:
             git branch -f "$TARGET_BRANCH" origin/main
             git checkout "$TARGET_BRANCH"
 
+            #create ONLY IF NOT EXIST (mostly it will be there already)
             mkdir -p "$shared_folder"
+
+
+            # Remove all previous files from shared folder before injection, to ensure deletions sync correctly
+            rm -rf "$shared_folder"/*
 
             # Inject content from consumer/split branch
             git --git-dir="$GITHUB_WORKSPACE/consumer/.git" \
