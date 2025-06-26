@@ -51,9 +51,9 @@ jobs:
             git config user.email "github-actions[bot]@users.noreply.github.com"
             
             # go into the sync-auto branch of the consumer repo do do our fucking magic
-            # gotta checkout from the main branch to avoid any driff
-            git fetch origin main
-            git checkout -B sync-auto origin/main
+            # could try checkout from the main branch to avoid any driff, otherwise just update the sync-auto branch
+            #git fetch origin main
+            #git checkout -B sync-auto origin/main
 
             git checkout -b sync-auto || git checkout sync-auto
 
