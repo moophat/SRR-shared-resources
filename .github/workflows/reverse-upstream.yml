@@ -56,8 +56,10 @@ jobs:
 
               echo "Injecting into shared-resources:$TARGET_BRANCH"
               cd "$GITHUB_WORKSPACE"
-              git fetch origin main
-              git checkout -B "$TARGET_BRANCH" origin/main
+              git fetch origin
+              git checkout main
+              git branch -f "$TARGET_BRANCH" origin/main
+              git checkout "$TARGET_BRANCH"
 
               mkdir -p "shared/$shared_folder"
               git --work-tree="shared/$shared_folder" checkout "$GITHUB_WORKSPACE/consumer" "$SPLIT_BRANCH" -- .
