@@ -73,7 +73,9 @@ jobs:
 
             git add .
             git commit -m "[auto-sync][$consumer] update shared folders" || echo "⚠️ Nothing to commit"
-            git push -f origin HEAD:sync-auto
+            #git push -f origin HEAD:sync-auto
+            git push -f origin sync-auto
+            git ls-remote --heads origin
 
             cd "$TMPDIR"
           done
