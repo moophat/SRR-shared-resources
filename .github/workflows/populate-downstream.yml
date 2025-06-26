@@ -46,11 +46,15 @@ jobs:
             cd "$TMPDIR"
             git clone "https://${GH_PAT}@${REPO#https://}" "$consumer"
             cd "$consumer"
-            # Set git identify for this folder
+            # Set git identify for this folder,whatever
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
             
             # go into the sync-auto branch of the consumer repo do do our fucking magic
+            # gotta checkout from the main branch to avoid any driff
+            git fetch origin main
+            git checkout -B sync-auto origin/main
+
             git checkout -b sync-auto || git checkout sync-auto
 
             # Link back to shared repo to fetch split branches
@@ -67,10 +71,11 @@ jobs:
 
               
               mkdir -p "$TARGET_PATH"
-              # set the DESTINATION folder
+              # set the DESTINATION folder using git checkout using work-tree, but this WILL cause us to lose the bloody commit history on this folder (of the shared repo), only lastest data is retain
               git --work-tree="$TARGET_PATH" checkout "shared/split-$folder" -- .
-            done
 
+            done
+            # can use git add . in the above loop to only add the shared folder, but fuck it we checked out from main right
             git add .
             git commit -m "[auto-sync][$consumer] update shared folders" || echo "⚠️ Nothing to commit"
             #git push -f origin HEAD:sync-auto
