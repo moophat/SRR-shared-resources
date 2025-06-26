@@ -76,7 +76,7 @@ jobs:
 
             done
             # can use git add . in the above loop to only add the shared folder, but fuck it we checked out from main right
-            git add .
+            git add -A .
             git commit -m "[auto-sync][$consumer] update shared folders" || echo "⚠️ Nothing to commit"
             #git push -f origin HEAD:sync-auto
             git push -f origin sync-auto
