@@ -1,14 +1,64 @@
-name: Reverse Upstream Trigger Test
+name: Reverse Upstream Sync – Pull from Consumer
 
 on:
   repository_dispatch:
     types: [push-upstream]
 
 jobs:
-  confirm-trigger:
+  reverse-upstream:
     runs-on: ubuntu-latest
+
     steps:
-      - name: ✅ Dispatch received
+      - name: ⬇️ Checkout shared-resources repo
+        uses: actions/checkout@v4
+
+      - name: 🧰 Install yq
         run: |
-          echo "🔔 Triggered by repository_dispatch"
-          echo "🔧 Consumer: ${{ github.event.client_payload.consumer }}"
+          mkdir -p $HOME/bin
+          curl -L https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -o $HOME/bin/yq
+          chmod +x $HOME/bin/yq
+        shell: bash
+
+      - name: 🧠 Extract consumer name from dispatch
+        id: extract
+        run: echo "consumer=${{ github.event.client_payload.consumer }}" >> $GITHUB_OUTPUT
+
+      - name: 📄 Parse consumer-config.yml
+        id: config
+        run: |
+          CONFIG=".github/consumer-config.yml"
+          CONSUMER="${{ steps.extract.outputs.consumer }}"
+          REPO=$(yq e ".\"$CONSUMER\".repo" "$CONFIG")
+          echo "repo=$REPO" >> $GITHUB_OUTPUT
+        shell: bash
+
+      - name: 🧬 Clone consumer repo
+        run: |
+          git clone "${{ steps.config.outputs.repo }}" consumer
+          cd consumer
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout main
+        env:
+          GH_PAT: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🔄 Subtree split each mapped folder
+        run: |
+          set -e
+          cd consumer
+
+          CONFIG="$GITHUB_WORKSPACE/.github/consumer-config.yml"
+          CONSUMER="${{ steps.extract.outputs.consumer }}"
+
+          yq e ".\"$CONSUMER\".folders" "$CONFIG" | \
+          yq e 'to_entries | .[] | .value + ":" + .key' - | while IFS=":" read -r local_path shared_folder; do
+            echo "🌲 Splitting $local_path → shared folder $shared_folder"
+
+            BRANCH_NAME="tmp-upstream-split-$shared_folder"
+            TARGET_BRANCH="from-${CONSUMER}-${shared_folder}"
+
+            git subtree split --prefix="$local_path" -b "$BRANCH_NAME"
+
+            echo "🚀 Pushing to $TARGET_BRANCH"
+            git push origin "$BRANCH_NAME:$TARGET_BRANCH" --force
+          done
