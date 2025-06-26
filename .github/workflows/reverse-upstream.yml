@@ -79,7 +79,7 @@ jobs:
                 --work-tree="$GITHUB_WORKSPACE/$shared_folder" \
                 checkout "$SPLIT_BRANCH" -- .
 
-            git add "$shared_folder"
+            git add -A "$shared_folder"
             git commit -m "[auto-sync][$CONSUMER] update $shared_folder" || echo "Nothing to commit"
             # Need fucking PAT here again because we did not do any git operation with this repo (yet) on this cli, only checkout using checkout action
             echo "Using GH_PAT: ${GH_PAT:0:4}********"
