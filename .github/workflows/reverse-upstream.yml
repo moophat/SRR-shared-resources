@@ -9,40 +9,42 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: ⬇️ Checkout shared-resources repo
+      # clone the shared-resources repo
+      - name: Checkout self (shared repo)
         uses: actions/checkout@v4
 
-      - name: 🧰 Install yq
+      # install yq (Go version)
+      - name: Install yq
         run: |
           mkdir -p $HOME/bin
           curl -L https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -o $HOME/bin/yq
           chmod +x $HOME/bin/yq
-        shell: bash
 
-      - name: 🧠 Extract consumer name from dispatch
+      # grab consumer name from payload
+      - name: Extract consumer name
         id: extract
         run: echo "consumer=${{ github.event.client_payload.consumer }}" >> $GITHUB_OUTPUT
 
-      - name: 📄 Parse consumer-config.yml
+      # extract repo URL from consumer-config.yml
+      - name: Load consumer repo info
         id: config
         run: |
           CONFIG=".github/consumer-config.yml"
           CONSUMER="${{ steps.extract.outputs.consumer }}"
           REPO=$(yq e ".\"$CONSUMER\".repo" "$CONFIG")
           echo "repo=$REPO" >> $GITHUB_OUTPUT
-        shell: bash
 
-      - name: 🧬 Clone consumer repo
+      # clone the actual consumer repo and prepare for split
+      - name: Clone consumer and checkout main
         run: |
           git clone "${{ steps.config.outputs.repo }}" consumer
           cd consumer
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git checkout main
-        env:
-          GH_PAT: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 🔄 Subtree split each mapped folder
+      # main split and push loop
+      - name: Subtree split and push
         run: |
           set -e
           cd consumer
@@ -52,13 +54,10 @@ jobs:
 
           yq e ".\"$CONSUMER\".folders" "$CONFIG" | \
           yq e 'to_entries | .[] | .value + ":" + .key' - | while IFS=":" read -r local_path shared_folder; do
-            echo "🌲 Splitting $local_path → shared folder $shared_folder"
+            echo "Splitting $local_path into subtree branch tmp-upstream-split-$shared_folder"
+            git subtree split --prefix="$local_path" -b "tmp-upstream-split-$shared_folder"
 
-            BRANCH_NAME="tmp-upstream-split-$shared_folder"
             TARGET_BRANCH="from-${CONSUMER}-${shared_folder}"
-
-            git subtree split --prefix="$local_path" -b "$BRANCH_NAME"
-
-            echo "🚀 Pushing to $TARGET_BRANCH"
-            git push origin "$BRANCH_NAME:$TARGET_BRANCH" --force
+            echo "Pushing split to shared-resources:$TARGET_BRANCH"
+            git push origin "tmp-upstream-split-$shared_folder:$TARGET_BRANCH" --force
           done
