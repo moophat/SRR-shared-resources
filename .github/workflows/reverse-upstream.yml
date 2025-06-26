@@ -74,7 +74,9 @@ jobs:
             git commit -m "[auto-sync][$CONSUMER] update $shared_folder" || echo "Nothing to commit"
             # Need fucking PAT here again because we did not do any git operation with this repo (yet) on this cli, only checkout using checkout action
             echo "Using GH_PAT: ${GH_PAT:0:4}********"
-            git push -f "https://${GH_PAT}@github.com/moophat/SRR-shared-resources.git" "$TARGET_BRANCH"
+            git remote set-url origin "https://${GH_PAT}@github.com/moophat/SRR-shared-resources.git"
+            git push -f origin "$TARGET_BRANCH"
+
 
 
             # Go back to consumer repo for next folder
