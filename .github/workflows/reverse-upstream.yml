@@ -72,7 +72,9 @@ jobs:
 
             git add "$shared_folder"
             git commit -m "[auto-sync][$CONSUMER] update $shared_folder" || echo "Nothing to commit"
-            git push -f origin "$TARGET_BRANCH"
+            # Need fucking PAT here again because we did not do any git operation with this repo (yet) on this cli, only checkout using checkout action
+            git push -f "https://${GH_PAT}@github.com/moophat/SRR-shared-resources.git" "$TARGET_BRANCH"
+
 
             # Go back to consumer repo for next folder
             cd "$GITHUB_WORKSPACE/consumer"
