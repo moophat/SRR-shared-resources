@@ -29,7 +29,7 @@ jobs:
           CONSUMER="${{ steps.extract.outputs.consumer }}"
           echo "REPO=$(yq e ".\"$CONSUMER\".repo" "$CONFIG")" >> $GITHUB_ENV
 
-      - name: Pull content from consumer and inject into shared-resources
+      - name: Pull from consumer and inject split folder into clean branch
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
         run: |
@@ -37,6 +37,7 @@ jobs:
           CONSUMER="${{ steps.extract.outputs.consumer }}"
           CONFIG=".github/consumer-config.yml"
 
+          # Clone consumer repo and split each folder
           git clone "https://${GH_PAT}@${REPO#https://}" consumer
           cd consumer
           git checkout main
@@ -52,19 +53,33 @@ jobs:
               TARGET_BRANCH="from-${CONSUMER}-${shared_folder}"
 
               git subtree split --prefix="$local_path" -b "$SPLIT_BRANCH"
+              git bundle create "/tmp/$SPLIT_BRANCH.bundle" "$SPLIT_BRANCH"
+          done
 
-              echo "Injecting into shared-resources:$TARGET_BRANCH"
-              cd "$GITHUB_WORKSPACE"
+          # Go back to shared-resources repo
+          cd "$GITHUB_WORKSPACE"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git remote add consumer ../consumer || true
+          git fetch consumer
+
+          yq e ".\"$CONSUMER\".folders" "$CONFIG" | \
+            yq e 'to_entries | .[] | .key as $k | .value as $v | [$v, $k] | @tsv' - \
+            | while IFS=$'\t' read -r local_path shared_folder; do
+
+              SPLIT_BRANCH="consumer/split-$shared_folder"
+              TARGET_BRANCH="from-${CONSUMER}-${shared_folder}"
+
+              echo "Creating $TARGET_BRANCH from origin/main"
               git fetch origin
-              git checkout main
               git branch -f "$TARGET_BRANCH" origin/main
               git checkout "$TARGET_BRANCH"
 
+              echo "Injecting folder $shared_folder"
               mkdir -p "$shared_folder"
-              git --work-tree="$shared_folder" checkout "$GITHUB_WORKSPACE/consumer" "$SPLIT_BRANCH" -- .
+              git --work-tree="$shared_folder" checkout "$SPLIT_BRANCH" -- .
 
-              git config user.name "github-actions[bot]"
-              git config user.email "github-actions[bot]@users.noreply.github.com"
               git add "$shared_folder"
               git commit -m "[auto-sync][$CONSUMER] update $shared_folder" || echo "Nothing to commit"
               git push -f origin "$TARGET_BRANCH"
