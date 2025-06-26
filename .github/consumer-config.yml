@@ -1,0 +1,22 @@
+audit-tool:
+  repo: https://github.com/moophat/SRR-audit-tool.git
+  folders:
+    jsnapy: network_template/jsnapy
+    robottest: network_template/robottest
+    tableview: network_template/tableview
+
+template-editor:
+  repo: https://github.com/moophat/SRR-template-editor.git
+  folders:
+    jsnapy: template/jsnapy
+    jinja2: template/jinja2
+    ttp: template/ttp
+    textfsm: template/textfsm
+    tableview: template/tableview
+
+monitoring-tool:
+  repo: https://github.com/moophat/SRR-monitoring-tool.git
+  folders:
+    grafana-dashboard: resource/grafana-dashboard
+    query-rule: resource/query-rule
+    tableview: resource/tableview

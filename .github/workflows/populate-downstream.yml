@@ -1,0 +1,59 @@
+name: Populate Downstream
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout shared repo
+        uses: actions/checkout@v3
+
+      - name: Install yq
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y yq
+
+      - name: Run downstream sync
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+        run: |
+          set -e
+
+          CONFIG=".github/consumer-config.yml"
+          TMPDIR=$(mktemp -d)
+
+          for consumer in $(yq e 'keys | .[]' "$CONFIG"); do
+            REPO=$(yq e ".\"$consumer\".repo" "$CONFIG")
+            echo "🔄 Syncing consumer: $consumer ($REPO)"
+
+            # Clone consumer repo once
+            cd "$TMPDIR"
+            git clone "https://${GH_PAT}@${REPO#https://}" "$consumer"
+            cd "$consumer"
+            git checkout -b sync-auto || git checkout sync-auto
+
+            # Link back to shared repo to fetch split branches
+            git remote add shared "$GITHUB_WORKSPACE"
+            git fetch shared
+
+            # Loop through folders
+            for folder in $(yq e ".\"$consumer\".folders | keys | .[]" "$CONFIG"); do
+              TARGET_PATH=$(yq e ".\"$consumer\".folders.\"$folder\"" "$CONFIG")
+              echo "📦 Injecting $folder → $TARGET_PATH"
+
+              cd "$TMPDIR/$consumer"
+              mkdir -p "$TARGET_PATH"
+              git --work-tree="$TARGET_PATH" checkout "shared/split-$folder" -- .
+            done
+
+            git add .
+            git commit -m "[auto-sync][$consumer] update shared folders" || echo "⚠️ Nothing to commit"
+            git push origin HEAD:sync-auto
+
+            cd "$TMPDIR"
+          done
