@@ -1,0 +1,171 @@
+name: Auto PR for Upstream Syncs
+
+on:
+  workflow_dispatch:
+    inputs:
+      consumer:
+        description: 'Consumer name'
+        required: false
+        type: string
+      folder:
+        description: 'Folder name'
+        required: false
+        type: string
+      branch:
+        description: 'Branch name'
+        required: false
+        type: string
+      commit_sha:
+        description: 'Consumer commit SHA'
+        required: false
+        type: string
+      commit_message:
+        description: 'Consumer commit message'
+        required: false
+        type: string
+
+permissions:
+  pull-requests: write
+  contents: read
+
+jobs:
+  create-pr:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout shared repo
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0  # Need full history to see all branches
+
+      - name: Determine mode
+        id: mode
+        run: |
+          if [ -n "${{ inputs.branch }}" ]; then
+            echo "mode=single" >> $GITHUB_OUTPUT
+            echo "🎯 Running in single-branch mode"
+          else
+            echo "mode=scan" >> $GITHUB_OUTPUT
+            echo "🔍 Running in scan mode"
+          fi
+
+      - name: Create PR for single branch (auto mode)
+        if: steps.mode.outputs.mode == 'single'
+        run: |
+          BRANCH="${{ inputs.branch }}"
+          CONSUMER="${{ inputs.consumer }}"
+          FOLDER="${{ inputs.folder }}"
+          COMMIT_SHA="${{ inputs.commit_sha }}"
+          COMMIT_MSG="${{ inputs.commit_message }}"
+
+          echo "Creating PR for branch: $BRANCH"
+
+          # Check if PR already exists
+          EXISTING_PR=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number')
+
+          if [ -n "$EXISTING_PR" ]; then
+            echo "⚠️ PR already exists: #$EXISTING_PR"
+            exit 0
+          fi
+
+          # Create PR body
+          PR_BODY="Upstream sync from consumer: $CONSUMER
+
+Folder: \`$FOLDER\`
+Consumer commit: \`$COMMIT_SHA\`"
+
+          if [ -n "$COMMIT_MSG" ]; then
+            PR_BODY="$PR_BODY
+
+Original commit message:
+> $COMMIT_MSG"
+          fi
+
+          # Create PR
+          gh pr create \
+            --title "Sync $FOLDER from $CONSUMER" \
+            --body "$PR_BODY" \
+            --base main \
+            --head "$BRANCH"
+
+          echo "✅ Pull request created successfully"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Scan and create PRs for all branches (manual mode)
+        if: steps.mode.outputs.mode == 'scan'
+        run: |
+          echo "🔍 Scanning for from-* branches without PRs..."
+
+          # Get all remote from-* branches
+          BRANCHES=$(git branch -r | grep 'origin/from-' | sed 's|origin/||' | sed 's/^[[:space:]]*//')
+
+          if [ -z "$BRANCHES" ]; then
+            echo "No from-* branches found"
+            exit 0
+          fi
+
+          PR_COUNT=0
+
+          for branch in $BRANCHES; do
+            echo ""
+            echo "Processing branch: $branch"
+
+            # Parse branch name: from-consumer-folder
+            # Handle multi-word consumers/folders (e.g., from-monitoring-tool-tableview)
+            BRANCH_PARTS=$(echo "$branch" | sed 's/from-//')
+
+            # Split by last dash to get folder (assumes folder is single word)
+            FOLDER=$(echo "$BRANCH_PARTS" | rev | cut -d'-' -f1 | rev)
+            CONSUMER=$(echo "$BRANCH_PARTS" | rev | cut -d'-' -f2- | rev)
+
+            echo "  Consumer: $CONSUMER"
+            echo "  Folder: $FOLDER"
+
+            # Check if PR already exists
+            EXISTING_PR=$(gh pr list --head "$branch" --state open --json number --jq '.[0].number')
+
+            if [ -n "$EXISTING_PR" ]; then
+              echo "  ⏭️ PR already exists: #$EXISTING_PR, skipping"
+              continue
+            fi
+
+            # Fetch commit details from the branch
+            git fetch origin "$branch"
+            COMMIT_MSG=$(git log "origin/$branch" -1 --pretty=%B)
+
+            # Try to parse consumer SHA from commit message
+            CONSUMER_SHA=$(echo "$COMMIT_MSG" | grep "Consumer:" | sed 's/.*@\(.*\)/\1/' || echo "")
+
+            # Create PR body
+            PR_BODY="Upstream sync from consumer: $CONSUMER
+
+Folder: \`$FOLDER\`"
+
+            if [ -n "$CONSUMER_SHA" ]; then
+              PR_BODY="$PR_BODY
+Consumer commit: \`$CONSUMER_SHA\`"
+            fi
+
+            PR_BODY="$PR_BODY
+
+Commit details:
+\`\`\`
+$COMMIT_MSG
+\`\`\`"
+
+            # Create PR
+            gh pr create \
+              --title "Sync $FOLDER from $CONSUMER" \
+              --body "$PR_BODY" \
+              --base main \
+              --head "$branch"
+
+            echo "  ✅ Created PR for $branch"
+            PR_COUNT=$((PR_COUNT + 1))
+          done
+
+          echo ""
+          echo "✅ Scan complete. Created $PR_COUNT pull request(s)."
+        env:
+          GH_TOKEN: ${{ github.token }}

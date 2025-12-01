@@ -148,7 +148,17 @@ jobs:
             git push origin "$BRANCH_NAME"
 
             echo "✅ Successfully created branch: $BRANCH_NAME"
-            echo "   Next: Create PR from $BRANCH_NAME → main"
+
+            # Trigger auto-PR workflow
+            echo "📝 Triggering auto-PR workflow"
+            GH_TOKEN="$GH_PAT" gh workflow run auto-pr-upstream.yml \
+              -f consumer="$CONSUMER" \
+              -f folder="$FOLDER" \
+              -f branch="$BRANCH_NAME" \
+              -f commit_sha="$COMMIT_SHA" \
+              -f commit_message="$COMMIT_MSG"
+
+            echo "✅ Auto-PR workflow triggered"
           fi
 
           # Cleanup
