@@ -129,17 +129,11 @@ jobs:
             echo "⚠️ No changes to commit"
           else
             # Create commit message with traceability
-            COMMIT_BODY="[auto-sync][$CONSUMER] update $FOLDER from consumer"
             if [ -n "$COMMIT_MSG" ]; then
-              COMMIT_BODY="${COMMIT_BODY}
-
-Original commit message: $COMMIT_MSG"
+              git commit -m "[auto-sync][$CONSUMER] update $FOLDER from consumer" -m "Original commit message: $COMMIT_MSG" -m "Consumer: $CONSUMER_REPO@$COMMIT_SHA"
+            else
+              git commit -m "[auto-sync][$CONSUMER] update $FOLDER from consumer" -m "Consumer: $CONSUMER_REPO@$COMMIT_SHA"
             fi
-            COMMIT_BODY="${COMMIT_BODY}
-
-Consumer: $CONSUMER_REPO@$COMMIT_SHA"
-
-            git commit -m "$COMMIT_BODY"
 
             # Push branch (normal push, not force)
             echo "⬆️ Pushing branch to origin"
