@@ -68,23 +68,16 @@ jobs:
             exit 0
           fi
 
-          # Create PR body
-          PR_BODY="Upstream sync from consumer: $CONSUMER
-
-Folder: \`$FOLDER\`
-Consumer commit: \`$COMMIT_SHA\`"
-
-          if [ -n "$COMMIT_MSG" ]; then
-            PR_BODY="$PR_BODY
-
-Original commit message:
-> $COMMIT_MSG"
-          fi
-
-          # Create PR
+          # Create PR with heredoc to avoid YAML escaping issues
           gh pr create \
             --title "Sync $FOLDER from $CONSUMER" \
-            --body "$PR_BODY" \
+            --body "$(cat <<EOF
+Upstream sync from consumer: **$CONSUMER**
+
+- **Folder**: \`$FOLDER\`
+- **Consumer commit**: \`$COMMIT_SHA\`
+EOF
+)" \
             --base main \
             --head "$BRANCH"
 
@@ -137,29 +130,31 @@ Original commit message:
             # Try to parse consumer SHA from commit message
             CONSUMER_SHA=$(echo "$COMMIT_MSG" | grep "Consumer:" | sed 's/.*@\(.*\)/\1/' || echo "")
 
-            # Create PR body
-            PR_BODY="Upstream sync from consumer: $CONSUMER
-
-Folder: \`$FOLDER\`"
-
+            # Create PR with heredoc to avoid YAML escaping issues
             if [ -n "$CONSUMER_SHA" ]; then
-              PR_BODY="$PR_BODY
-Consumer commit: \`$CONSUMER_SHA\`"
+              gh pr create \
+                --title "Sync $FOLDER from $CONSUMER" \
+                --body "$(cat <<EOF
+Upstream sync from consumer: **$CONSUMER**
+
+- **Folder**: \`$FOLDER\`
+- **Consumer commit**: \`$CONSUMER_SHA\`
+EOF
+)" \
+                --base main \
+                --head "$branch"
+            else
+              gh pr create \
+                --title "Sync $FOLDER from $CONSUMER" \
+                --body "$(cat <<EOF
+Upstream sync from consumer: **$CONSUMER**
+
+- **Folder**: \`$FOLDER\`
+EOF
+)" \
+                --base main \
+                --head "$branch"
             fi
-
-            PR_BODY="$PR_BODY
-
-Commit details:
-\`\`\`
-$COMMIT_MSG
-\`\`\`"
-
-            # Create PR
-            gh pr create \
-              --title "Sync $FOLDER from $CONSUMER" \
-              --body "$PR_BODY" \
-              --base main \
-              --head "$branch"
 
             echo "  ✅ Created PR for $branch"
             PR_COUNT=$((PR_COUNT + 1))
