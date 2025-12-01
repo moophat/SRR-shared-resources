@@ -83,9 +83,12 @@ jobs:
 
             # Commit all changes
             git add -A .
-            git commit -m "[auto-sync][$consumer] update shared folders
+            git commit -m "$(cat <<EOF
+[auto-sync][$consumer] update shared folders
 
-Source: moophat/SRR-shared-resources@$SHARED_COMMIT" || echo "⚠️ Nothing to commit"
+Source: moophat/SRR-shared-resources@$SHARED_COMMIT
+EOF
+)" || echo "⚠️ Nothing to commit"
 
             # Force push to sync-auto branch
             git push -f origin sync-auto
