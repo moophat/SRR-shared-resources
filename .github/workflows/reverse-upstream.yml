@@ -1,98 +1,154 @@
-name: Reverse Upstream Sync – Inject from Consumer
+name: Reverse Upstream Sync
 
 on:
   repository_dispatch:
     types: [push-upstream]
 
 jobs:
-  reverse-upstream:
+  sync-from-consumer:
     runs-on: ubuntu-latest
 
     steps:
-      #- name: Checkout shared-resources
-      #  uses: actions/checkout@v4
-        
-      - name: Clone shared-resources with PAT
-        env:
-          GH_PAT: ${{ secrets.GH_PAT }} 
-      # abosulutely must do this clone using command line, can NOT use checkout action because fucking git will not allow us to push back using GH_PAT later if we cloned using action plugin
-        run: |
-          git clone "https://${GH_PAT}@github.com/moophat/SRR-shared-resources.git" .
-          git checkout main
+      - name: Checkout shared repo
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0  # Required for subtree operations
 
-
-      - name: Install yq
+      - name: Install yq (Go version)
         run: |
           mkdir -p $HOME/bin
           curl -L https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -o $HOME/bin/yq
           chmod +x $HOME/bin/yq
 
-      - name: Extract consumer name
-        id: extract
-        run: echo "consumer=${{ github.event.client_payload.consumer }}" >> $GITHUB_OUTPUT
+      - name: Add yq to PATH
+        run: echo "$HOME/bin" >> $GITHUB_PATH
 
-      - name: Parse consumer repo URL
-        id: config
+      - name: Extract payload data
+        id: payload
         run: |
-          CONFIG=".github/consumer-config.yml"
-          CONSUMER="${{ steps.extract.outputs.consumer }}"
-          echo "REPO=$(yq e ".\"$CONSUMER\".repo" "$CONFIG")" >> $GITHUB_ENV
+          echo "consumer=${{ github.event.client_payload.consumer }}" >> $GITHUB_OUTPUT
+          echo "folder=${{ github.event.client_payload.folder }}" >> $GITHUB_OUTPUT
+          echo "commit_sha=${{ github.event.client_payload.commit_sha }}" >> $GITHUB_OUTPUT
+          echo "commit_message=${{ github.event.client_payload.commit_message }}" >> $GITHUB_OUTPUT
+
+      - name: Validate payload
+        run: |
+          if [ -z "${{ steps.payload.outputs.consumer }}" ]; then
+            echo "❌ Error: consumer name is required in payload"
+            exit 1
+          fi
+          if [ -z "${{ steps.payload.outputs.folder }}" ]; then
+            echo "❌ Error: folder name is required in payload"
+            exit 1
+          fi
+          if [ -z "${{ steps.payload.outputs.commit_sha }}" ]; then
+            echo "❌ Error: commit_sha is required in payload"
+            exit 1
+          fi
 
       - name: Pull from consumer and inject into shared
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
         run: |
           set -e
-          CONSUMER="${{ steps.extract.outputs.consumer }}"
-          CONFIG=".github/consumer-config.yml"
 
-          git clone "https://${GH_PAT}@${REPO#https://}" consumer
+          CONSUMER="${{ steps.payload.outputs.consumer }}"
+          FOLDER="${{ steps.payload.outputs.folder }}"
+          COMMIT_SHA="${{ steps.payload.outputs.commit_sha }}"
+          COMMIT_MSG="${{ steps.payload.outputs.commit_message }}"
+
+          CONFIG="$GITHUB_WORKSPACE/.github/consumer-config.yml"
+
+          echo "🔁 Processing upstream sync from consumer: $CONSUMER"
+          echo "   Folder: $FOLDER"
+          echo "   Commit: $COMMIT_SHA"
+
+          # Get consumer repo URL and local path for the folder
+          CONSUMER_REPO=$(yq e ".\"$CONSUMER\".repo" "$CONFIG")
+          LOCAL_PATH=$(yq e ".\"$CONSUMER\".folders.\"$FOLDER\"" "$CONFIG")
+
+          if [ "$CONSUMER_REPO" = "null" ]; then
+            echo "❌ Error: Consumer '$CONSUMER' not found in config"
+            exit 1
+          fi
+
+          if [ "$LOCAL_PATH" = "null" ]; then
+            echo "❌ Error: Folder '$FOLDER' not configured for consumer '$CONSUMER'"
+            exit 1
+          fi
+
+          echo "   Consumer repo: $CONSUMER_REPO"
+          echo "   Consumer path: $LOCAL_PATH"
+
+          # Clone consumer repo
+          TMPDIR=$(mktemp -d)
+          cd "$TMPDIR"
+          git clone "https://${GH_PAT}@${CONSUMER_REPO#https://}" consumer
           cd consumer
-          git checkout main
+
+          # Checkout specific commit SHA
+          git checkout "$COMMIT_SHA"
+
+          # Set git identity
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          yq e ".\"$CONSUMER\".folders" "$GITHUB_WORKSPACE/$CONFIG" | \
-          yq e 'to_entries | .[] | .key as $k | .value as $v | [$v, $k] | @tsv' - \
-          | while IFS=$'\t' read -r local_path shared_folder; do
+          # Split the specified folder from consumer
+          SPLIT_BRANCH="split-$FOLDER"
+          echo "🌲 Splitting consumer folder: $LOCAL_PATH"
+          git subtree split --prefix="$LOCAL_PATH" -b "$SPLIT_BRANCH"
 
-            echo "🔁 Splitting $local_path → $shared_folder"
-            SPLIT_BRANCH="split-$shared_folder"
-            TARGET_BRANCH="from-${CONSUMER}-${shared_folder}"
+          # Inject into shared repo
+          cd "$GITHUB_WORKSPACE"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
 
-            # Create a subtree split branch
-            git subtree split --prefix="$local_path" -b "$SPLIT_BRANCH"
+          # Create branch name for upstream PR
+          BRANCH_NAME="from-$CONSUMER-$FOLDER"
+          echo "📝 Creating branch: $BRANCH_NAME"
 
-            # Inject into shared-resources repo
-            cd "$GITHUB_WORKSPACE"
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
+          # Create branch from latest main
+          git fetch origin
+          git checkout -b "$BRANCH_NAME" origin/main
 
-            git fetch origin
-            git branch -f "$TARGET_BRANCH" origin/main
-            git checkout "$TARGET_BRANCH"
+          # Create shared folder directory if needed
+          mkdir -p "$FOLDER"
 
-            #create ONLY IF NOT EXIST (mostly it will be there already)
-            mkdir -p "$shared_folder"
+          # Remove all previous files from shared folder before injection, to ensure deletions sync correctly
+          rm -rf "$FOLDER"/*
 
+          # Inject content from consumer split branch
+          git --git-dir="$TMPDIR/consumer/.git" \
+              --work-tree="$GITHUB_WORKSPACE/$FOLDER" \
+              checkout "$SPLIT_BRANCH" -- .
 
-            # Remove all previous files from shared folder before injection, to ensure deletions sync correctly
-            rm -rf "$shared_folder"/*
+          # Commit changes
+          git add -A "$FOLDER"
 
-            # Inject content from consumer/split branch
-            git --git-dir="$GITHUB_WORKSPACE/consumer/.git" \
-                --work-tree="$GITHUB_WORKSPACE/$shared_folder" \
-                checkout "$SPLIT_BRANCH" -- .
+          if git diff --cached --quiet; then
+            echo "⚠️ No changes to commit"
+          else
+            # Create commit message with traceability
+            COMMIT_BODY="[auto-sync][$CONSUMER] update $FOLDER from consumer"
+            if [ -n "$COMMIT_MSG" ]; then
+              COMMIT_BODY="${COMMIT_BODY}
 
-            git add -A "$shared_folder"
-            git commit -m "[auto-sync][$CONSUMER] update $shared_folder" || echo "Nothing to commit"
-            # Need fucking PAT here again because we did not do any git operation with this repo (yet) on this cli, only checkout using checkout action
-            echo "Using GH_PAT: ${GH_PAT:0:4}********"
-            git remote set-url origin "https://${GH_PAT}@github.com/moophat/SRR-shared-resources.git"
-            git push -f origin "$TARGET_BRANCH"
+Original commit message: $COMMIT_MSG"
+            fi
+            COMMIT_BODY="${COMMIT_BODY}
 
+Consumer: $CONSUMER_REPO@$COMMIT_SHA"
 
+            git commit -m "$COMMIT_BODY"
 
-            # Go back to consumer repo for next folder
-            cd "$GITHUB_WORKSPACE/consumer"
-          done
+            # Push branch (normal push, not force)
+            echo "⬆️ Pushing branch to origin"
+            git push origin "$BRANCH_NAME"
+
+            echo "✅ Successfully created branch: $BRANCH_NAME"
+            echo "   Next: Create PR from $BRANCH_NAME → main"
+          fi
+
+          # Cleanup
+          cd "$GITHUB_WORKSPACE"
+          rm -rf "$TMPDIR"
